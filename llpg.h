@@ -37,15 +37,17 @@ public:
 	virtual void print() const = 0;
 };
 
+template<operation o>
+struct mark;
+
 template <typename Left, typename Right, operation Operation>
 class rule_impl : public basic_rule_impl {
-	template<operation o>
-	struct mark;
+
 	void real_print(const mark<SEQUENCE> *) const {
 		std::cout << "[";
 		data.left.print();
 		std::cout << " ";
-		data.right.print();
+		data.left.print();
 		std::cout << "]";
 	}
 
@@ -78,7 +80,9 @@ class rule_impl : public basic_rule_impl {
 	void real_print(const mark<DELIMITED> *) const {
 		std::cout << "[";
 		data.left.print();
+		std::cout << "]";
 		std::cout << " % ";
+		std::cout << "[";
 		data.right.print();
 		std::cout << "]";
 	}
