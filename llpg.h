@@ -10,6 +10,11 @@
 
 #include <iostream>
 #include <boost/preprocessor.hpp>
+#include <vector>
+#include <boost/shared_ptr.hpp>
+#include <boost/foreach.hpp>
+#include <boost/lexical_cast.hpp>
+#include "tokenizer.h"
 
 enum operation {
 	SEQUENCE = 0,
@@ -18,7 +23,8 @@ enum operation {
 	OPTIONAL = 3,
 	LEAST_ONE = 4,
 	MANY = 5,
-	DELIMITED = 6
+	DELIMITED = 6,
+	TERMINAL = 8
 };
 
 #define UNARY_OPERATIONS \
@@ -42,25 +48,40 @@ struct mark;
 
 template <typename Left, typename Right, operation Operation>
 class rule_impl : public basic_rule_impl {
+	template <typename L, typename R, operation Op>
+	static void print_if_seq(rule_impl<L, R, Op> const & v) {
+		v.print();
+	}
 
-	void real_print(const mark<SEQUENCE> *) const {
-		std::cout << "[";
-		data.left.print();
+	template <typename L, typename R>
+	static void print_if_seq(rule_impl<L, R, SEQUENCE> const & v) {
+		v.real_print((mark<SEQUENCE> *)0, false);
+	}
+
+	void real_print(const mark<SEQUENCE> * p, bool braces = true) const {
+		if (braces)
+			std::cout << "[";
+		print_if_seq(data.left);
 		std::cout << " ";
-		data.left.print();
-		std::cout << "]";
+		print_if_seq(data.right);
+		if (braces)
+			std::cout << "]";
 	}
 
 	void real_print(const mark<ALTERNATIVE> *) const {
-		std::cout << "[";
+		std::cout << "{";
 		data.left.print();
 		std::cout << " | ";
 		data.right.print();
-		std::cout << "]";
+		std::cout << "}";
 	}
 
 	void real_print(const mark<ALIAS> *) const {
 		std::cout << data.left->name();
+	}
+
+	void real_print(const mark<TERMINAL> *) const {
+		std::cout << data.left->to_string();
 	}
 
 	void real_print(const mark<OPTIONAL> *) const {
@@ -78,13 +99,9 @@ class rule_impl : public basic_rule_impl {
 			data.left.print();
 	}
 	void real_print(const mark<DELIMITED> *) const {
-		std::cout << "[";
 		data.left.print();
-		std::cout << "]";
 		std::cout << " % ";
-		std::cout << "[";
 		data.right.print();
-		std::cout << "]";
 	}
 public:
 	template<typename T>
@@ -146,6 +163,10 @@ private:
 		T1 * left;
 	};
 	template<typename T1>
+	struct pair<T1, void, TERMINAL> {
+		T1 * left;
+	};
+	template<typename T1>
 	struct pair<T1, void, OPTIONAL> {
 		T1 left;
 	};
@@ -155,10 +176,19 @@ public:
 	pair<Left, Right, Operation> data;
 };
 
+
+template<typename T>
+rule_impl<tokenclass<T>, void, TERMINAL> make_tokenclass(std::string const & name, std::string const & regex) {
+	rule_impl<tokenclass<T>,void, TERMINAL> t;
+	t.data.left = new tokenclass<T>(name, regex);
+	return t;
+}
+
+#define TOKEN(T, name, regex) rule_impl<tokenclass<T>,void, TERMINAL> name = make_tokenclass<T>(#name, regex);
+
 template<typename R>
 class rule {
 private:
-
 public:
 	typedef rule_impl<rule<R>, void, ALIAS> alias_impl;
 
@@ -168,7 +198,7 @@ public:
 		data->rc = 1;
 	}
 
-	~rule() {
+	virtual ~rule() {
 		if (!--data->rc) {
 			delete data->impl;
 			delete data;
@@ -268,10 +298,13 @@ typename rule<T>::alias_impl::template bintype<typename rule<V>::alias_impl, BOO
 	return a BOOST_PP_TUPLE_ELEM(2, 0, elem) b;\
 }
 
+
 BOOST_PP_SEQ_FOR_EACH(BINARY_OP, ~, BINARY_OPERATIONS)
 #undef BINARY_OP
 
 #undef UNARY_OPERATIONS
 #undef BINARY_OPERATIONS
+
+
 
 #endif /* LLPG_H_ */
