@@ -24,6 +24,8 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/make_shared.hpp>
+#include "referencable.h"
+#include <boost/intrusive_ptr.hpp>
 
 typedef std::vector<std::string>::iterator Iterator;
 
@@ -35,7 +37,16 @@ class parse_error : public std::exception {
 };
 
 template<typename R>
-class binded_sequence {
+class parsing_primitive : public referencable {
+public:
+	virtual ~parsing_primitive(){};
+	virtual bool match(std::string const &) const = 0;
+	virtual bool is_epsilon() const {return 0;}
+	virtual R parse(Iterator & pos, Iterator const & end) const = 0;
+};
+
+template<typename R>
+class binded_sequence : public parsing_primitive<R> {
 public:
 	template<typename Callback, typename Sequence>
 	binded_sequence(Callback const & callable, Sequence const & seq) {
@@ -56,7 +67,6 @@ public:
 
 	R parse(Iterator & pos, Iterator const & end) const {
 		R res = pimpl->parse(pos, end);
-		std::cout << ">>>> BINDED SEQUENCE " << res << std::endl;
 		return res;
 	}
 
@@ -120,12 +130,11 @@ public:\
 	boost::fusion::vector<T_0 BOOST_PP_REPEAT_FROM_TO(1, N, TNARG, T_)>  parse(Iterator & pos, Iterator const & end) const {\
 		boost::fusion::vector<T_0 BOOST_PP_REPEAT_FROM_TO(1, N, TNARG, T_)> ans;\
 		BOOST_PP_REPEAT_FROM_TO(0, N, PARSE, ~)\
-		std::cout << ">>>> SEQUENCE " BOOST_PP_REPEAT_FROM_TO(0, N, PRINT, ~) << std::endl;\
 		return ans;\
 	}\
 	template<typename C>\
-	binded_sequence<typename boost::fusion::result_of::invoke<C, boost::fusion::vector<T_0 BOOST_PP_REPEAT_FROM_TO(1, N, TNARG, T_)> >::type> operator[](C const & callback) {\
-		return binded_sequence<typename boost::fusion::result_of::invoke<C, boost::fusion::vector<T_0 BOOST_PP_REPEAT_FROM_TO(1, N, TNARG, T_)> >::type>(callback, (*this));\
+	boost::intrusive_ptr<binded_sequence<typename boost::fusion::result_of::invoke<C, boost::fusion::vector<T_0 BOOST_PP_REPEAT_FROM_TO(1, N, TNARG, T_)> >::type> > operator[](C const & callback) {\
+		return new binded_sequence<typename boost::fusion::result_of::invoke<C, boost::fusion::vector<T_0 BOOST_PP_REPEAT_FROM_TO(1, N, TNARG, T_)> >::type>(callback, (*this));\
 	}\
 	bool match(std::string const & s) const {\
 		BOOST_PP_REPEAT_FROM_TO(0, N, MATCH, ~)\
@@ -139,29 +148,29 @@ private:\
 template<typename T>
 class alternative {
 public:
-	alternative(binded_sequence<T> const & seq) {
+	alternative(boost::intrusive_ptr<binded_sequence<T> > const & seq) {
 		data.push_back(seq);
 	}
-	alternative operator |(binded_sequence<T> const & s) {
+	alternative operator |(boost::intrusive_ptr<binded_sequence<T> > const & s) {
 		alternative res = (*this);
 		res.data.push_back(s);
 		return res;
 	}
 
-	std::vector<binded_sequence<T> > const & get() const {
+	std::vector<boost::intrusive_ptr<binded_sequence<T> > > const & get() const {
 		return data;
 	}
 private:
-	std::vector<binded_sequence<T> > data;
+	std::vector<boost::intrusive_ptr<binded_sequence<T> > > data;
 };
 
 template<typename T>
-alternative<T> operator |(binded_sequence<T> const & a, binded_sequence<T> const & b) {
+alternative<T> operator |(boost::intrusive_ptr<binded_sequence<T> > const & a, boost::intrusive_ptr<binded_sequence<T> > const & b) {
 	return alternative<T>(a) | b;
 }
 
 template<typename T, typename T1>
-alternative<T> operator |(binded_sequence<T> const & a, T1 const & b) {
+alternative<T> operator |(boost::intrusive_ptr<binded_sequence<T> > const & a, T1 const & b) {
 	return alternative<T>(a) | b;
 }
 
@@ -171,10 +180,9 @@ T id(T const & a) {
 }
 
 template<typename T>
-class terminal {
+class terminal : public parsing_primitive<T> {
 public:
 	terminal(std::string const & regex) : e(regex) {
-
 	}
 
 	bool match(std::string const & s) const {
@@ -186,9 +194,10 @@ public:
 			throw parse_error();
 		}
 		T r =  boost::lexical_cast<T>(*(pos++));
-		std::cout << ">>>> TERMINAL " << r << std::endl;
+		//std::cout << ">>>> TERMINAL " << r << std::endl;
 		return r;
 	}
+
 private:
 	boost::regex e;
 };
@@ -203,8 +212,7 @@ template<typename T>
 class rule {
 public:
 	rule(std::string const & name = "unnamed-rule") : is_epsilon_(boost::make_shared<bool>(0)),
-		seq(boost::make_shared<std::vector<binded_sequence<T> > >()),
-		term(boost::make_shared<std::vector<terminal<T> > >()),
+		seq(boost::make_shared<std::vector<boost::intrusive_ptr<parsing_primitive<T> > > >()),
 		name(boost::make_shared<std::string>(name)),
 		default_value(boost::make_shared<T>()){}
 
@@ -213,32 +221,22 @@ public:
 		*default_value = e.value;
 	}
 
-	void operator =(binded_sequence<T> const & t) {
-		//seq.erase();
+	void operator =(boost::intrusive_ptr<binded_sequence<T> > const & t) {
 		seq->push_back(t);
-		std::cout << "ADD RULE " << seq->size() << std::endl;
 	}
 
 	void operator =(terminal<T> const & t) {
-		//seq.erase();
-		term->push_back(t);
-		std::cout << "ADD TERM " << term->size() << std::endl;
+		seq->push_back(new terminal<T>(t));
 	}
 
 	void operator =(alternative<T> const & t) {
-		//seq.erase();
-		BOOST_FOREACH(binded_sequence<T> const & s, t.get()) {
+		BOOST_FOREACH(boost::intrusive_ptr<binded_sequence<T> > const & s, t.get()) {
 			seq->push_back(s);
-			std::cout << "ADD RULE " << seq->size() << std::endl;
 		}
 	}
 
-	/*operator sequence<1, T>() const {
-		return sequence<1, T>();
-	}*/
-
-	operator binded_sequence<T>() const {
-		return binded_sequence<T>(&id<T>, (sequence<1, T>)(*this));
+	operator boost::intrusive_ptr<binded_sequence<T> >() const {
+		return new binded_sequence<T>(&id<T>, (sequence<1, T>)(*this));
 	}
 
 	template<typename T1>
@@ -247,24 +245,16 @@ public:
 	}
 
 	alternative<T> operator |(rule const & t) {
-		return alternative<T>((binded_sequence<T>)(*this)) | t;
+		return alternative<T>((boost::intrusive_ptr<binded_sequence<T> >)(*this)) | t;
 	}
 
 	bool is_epsilon() const {
 		return *is_epsilon_;
 	}
 
-
 	bool match(std::string const & s) const{
-		std::cout << *name << "::match " << term->size() << " " << seq->size() << std::endl;
-		BOOST_FOREACH(terminal<T> const & t, *term) {
-			if (t.match(s)) {
-				return true;
-			}
-		}
-
-		BOOST_FOREACH(binded_sequence<T> const & t, *seq) {
-			if (t.match(s)) {
+		BOOST_FOREACH(boost::intrusive_ptr<parsing_primitive<T> > const & t, *seq) {
+			if (t->match(s)) {
 				return true;
 			}
 		}
@@ -273,34 +263,21 @@ public:
 	}
 
 	T parse(Iterator & pos, Iterator const & end) const {
-		std::cout << *name << "::parse " << (pos == end) << std::endl;
 		if (pos == end) {
-			std::cout << "EOF" << std::endl;
 			if (!is_epsilon()) {
 				throw parse_error();
 			} else {
 				return *default_value;
 			}
-		} else {
-			std::cout << *name << " [" << *pos << "]" << std::endl;
 		}
 
 		if (!match(*pos)) {
 			throw parse_error();
 		}
 
-		BOOST_FOREACH(terminal<T> const & t, *term) {
-			if (t.match(*pos)) {
-				T res = t.parse(pos, end);
-				std::cout << *name << " = " << res << std::endl;
-				return res;
-			}
-		}
-
-		BOOST_FOREACH(binded_sequence<T> const & t, *seq) {
-			if (t.match(*pos)) {
-				T res = t.parse(pos, end);
-				std::cout << *name << " = " << res << std::endl;
+		BOOST_FOREACH(boost::intrusive_ptr<parsing_primitive<T> > const & t, *seq) {
+			if (t->match(*pos)) {
+				T res = t->parse(pos, end);
 				return res;
 			}
 		}
@@ -309,8 +286,7 @@ public:
 	}
 private:
 	boost::shared_ptr<bool> is_epsilon_;
-	boost::shared_ptr<std::vector<binded_sequence<T> > > seq;
-	boost::shared_ptr<std::vector<terminal<T> > > term;
+	boost::shared_ptr<std::vector<boost::intrusive_ptr<parsing_primitive<T> > > > seq;
 	boost::shared_ptr<std::string> name;
 	boost::shared_ptr<T> default_value;
 
