@@ -339,10 +339,7 @@ private:
 	boost::shared_ptr<std::vector<boost::intrusive_ptr<parsing_primitive<T> > > > seq;
 	boost::shared_ptr<std::string> name;
 	boost::shared_ptr<T> default_value;
-
 };
-
-
 
 BOOST_PP_REPEAT_FROM_TO(1, MAX_LEN, SEQ, ~)
 
