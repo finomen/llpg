@@ -76,9 +76,6 @@ int main() {
 	more_factors = epsilon<boost::function<int(int)> >(+_1);
 	factor = (lbrace >> expression >> rbrace) [+_2] | number;
 
-
-
-	//std::string s = "( ( 2 + 3 ) * 2 - 1 ) / 3 * 2 / 2 * 5";
 	std::string s;
 	std::vector<std::string> v;
 	for(;;) {
@@ -89,9 +86,18 @@ int main() {
 		boost::split(v, s, boost::is_any_of(" "), boost::token_compress_on);
 		std::vector<std::string>::iterator it1 = v.begin();
 		try {
-			std::cout << expression.parse(it1, v.end()) << std::endl;
+			int r =  expression.parse(it1, v.end());
+            if (it1 == v.end()) {
+                std::cout << s << " = " << r << std::endl;
+            } else {
+                std::cout << "EXPECTED EOF FOUND " << *it1 << std::endl;
+            }
 		} catch(parse_error const & e) {
-			std::cerr << "PARSE ERROR" << std::endl;
+            if (it1 == v.end()) {
+                std::cerr << "UEXPECTED END OF LINE" << std::endl;
+            } else {
+    			std::cerr << "EXPECTED {" << e.what() << "} GOT " << *it1 << std::endl;
+            }
 		}
 	}
 

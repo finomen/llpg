@@ -29,11 +29,27 @@
 
 typedef std::vector<std::string>::iterator Iterator;
 
-class unexpected_end_of_line : public std::exception{
+class unexpected_end_of_line : public std::exception {
 };
 
 class parse_error : public std::exception {
+private:
+    std::string message;
+public:
+    parse_error(std::vector<std::string> const & v = std::vector<std::string>()) throw(){
+        std::string d = "";
+        BOOST_FOREACH(std::string const & s, v) {
+            message += d + s;
+            d = ", ";
+        }
+    }
+    
+    virtual ~parse_error() throw() {
+    }
 
+    const char * what() const throw() {
+        return message.c_str();
+    }
 };
 
 template<typename R>
@@ -43,6 +59,7 @@ public:
 	virtual bool match(std::string const &) const = 0;
 	virtual bool is_epsilon() const {return 0;}
 	virtual R parse(Iterator & pos, Iterator const & end) const = 0;
+    virtual std::vector<std::string> first() const = 0;
 };
 
 template<typename R>
@@ -75,11 +92,16 @@ public:
 		++pimpl->rc;
 	}
 
+    std::vector<std::string> first() const {
+        return pimpl->first();
+    }
+
 private:
 	struct adata {
 		virtual ~adata(){}
 		virtual R parse(Iterator & pos, Iterator const & end) = 0;
 		virtual bool match(std::string const & s) const = 0;
+        virtual std::vector<std::string> first() const = 0;
 		size_t rc;
 	};
 	template<typename Callback, typename Sequence>
@@ -95,7 +117,9 @@ private:
 		virtual bool match(std::string const & s) const {
 			return seq.match(s);
 		}
-
+        virtual std::vector<std::string> first() const {
+            return seq.first();
+        }
 	};
 	adata * pimpl;
 };
@@ -106,6 +130,7 @@ private:
 #define TNARG(n, i, data) , BOOST_PP_CAT(data, i)
 #define RARG(n, i, data) , rule<BOOST_PP_CAT(data, i)>
 #define MATCH(n, i, data) if (boost::fusion::at_c<i>(rules).match(s)) return true; else if (!boost::fusion::at_c<i>(rules).is_epsilon()) return false;
+#define FIRST(n, i, data) tmp = boost::fusion::at_c<i>(rules).first(); res.insert(res.end(), tmp.begin(), tmp.end()); if (!boost::fusion::at_c<i>(rules).is_epsilon()) return res; 
 #define PARSE(n, i, data) boost::fusion::at_c<i>(ans) = boost::fusion::at_c<i>(rules).parse(pos, end);
 #define PRINT(n, i, data) << boost::fusion::at_c<i>(ans) << " "
 
@@ -140,6 +165,11 @@ public:\
 		BOOST_PP_REPEAT_FROM_TO(0, N, MATCH, ~)\
 		return false;\
 	}\
+    std::vector<std::string> first() const {\
+        std::vector<std::string> res, tmp;\
+        BOOST_PP_REPEAT_FROM_TO(0, N, FIRST, ~)\
+        return res;\
+    }\
 private:\
 	boost::fusion::vector<rule<T_0> BOOST_PP_REPEAT_FROM_TO(1, N, RARG, T_)> rules;\
 	template<size_t n BOOST_PP_REPEAT_FROM_TO(0, MAX_LEN, TARG, T__)> friend class sequence;\
@@ -191,13 +221,20 @@ public:
 
 	T parse(Iterator & pos, Iterator const & end) const {
 		if (!match(*pos)) {
-			throw parse_error();
+            std::vector<std::string> v;
+            v.push_back(e.str());
+			throw parse_error(v);
 		}
 		T r =  boost::lexical_cast<T>(*(pos++));
 		//std::cout << ">>>> TERMINAL " << r << std::endl;
 		return r;
 	}
-
+    
+    std::vector<std::string> first() const {
+        std::vector<std::string> v;
+        v.push_back(e.str());
+        return v;
+    }
 private:
 	boost::regex e;
 };
@@ -262,17 +299,27 @@ public:
 		return is_epsilon();
 	}
 
+    std::vector<std::string> first() const {
+        std::vector<std::string> res, tmp;
+        BOOST_FOREACH(boost::intrusive_ptr<parsing_primitive<T> > const & t, *seq) {
+            tmp = t->first();
+            res.insert(res.end(), tmp.begin(), tmp.end());
+        }
+        
+        return res;
+    }
+
 	T parse(Iterator & pos, Iterator const & end) const {
 		if (pos == end) {
 			if (!is_epsilon()) {
-				throw parse_error();
+				throw parse_error(first());
 			} else {
 				return *default_value;
 			}
 		}
 
 		if (!match(*pos)) {
-			throw parse_error();
+			throw parse_error(first());
 		}
 
 		BOOST_FOREACH(boost::intrusive_ptr<parsing_primitive<T> > const & t, *seq) {
