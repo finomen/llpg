@@ -65,7 +65,7 @@ int main() {
 	slash = terminal<char>("[/]");
 	lbrace = terminal<char>("[(]");
 	rbrace = terminal<char>("[)]");
-	number = terminal<int>("-?[0-9]*");
+	number = terminal<int>("-?[1-9][0-9]*");
 
 	expression = (term >> more_terms) [_1 + _2];
 	more_terms = (plus >> term >> more_terms) [_2 + _3] | (minus >> term >> more_terms) [-_2 + _3];
@@ -82,21 +82,25 @@ int main() {
 		std::getline(std::cin, s);
 		if (s.empty())
 			break;
-		v.clear();
-		boost::split(v, s, boost::is_any_of(" "), boost::token_compress_on);
-		std::vector<std::string>::iterator it1 = v.begin();
+		//v.clear();
+		//boost::split(v, s, boost::is_any_of(" "), boost::token_compress_on);
+		std::string::iterator it1 = s.begin();
 		try {
-			int r =  expression.parse(it1, v.end());
-            if (it1 == v.end()) {
+			int r =  expression.parse(it1, s.end());
+            if (it1 == s.end()) {
                 std::cout << s << " = " << r << std::endl;
             } else {
-                std::cout << "EXPECTED EOF FOUND " << *it1 << std::endl;
+                std::string::iterator some = it1+5;
+                std::string context(it1, (some>s.end())?s.end():some);
+                std::cout << "EXPECTED EOF FOUND `" << context << "`" << std::endl;
             }
 		} catch(parse_error const & e) {
-            if (it1 == v.end()) {
-                std::cerr << "UEXPECTED END OF LINE" << std::endl;
+            if (it1 == s.end()) {
+                std::cerr << "EXPECTING {" << e.what() << "} BUT END OF LINE FOUND" << std::endl;
             } else {
-    			std::cerr << "EXPECTED {" << e.what() << "} GOT " << *it1 << std::endl;
+                std::string::iterator some = it1+5;
+                std::string context(it1, (some>s.end())?s.end():some);
+    			std::cerr << "EXPECTED {" << e.what() << "} GOT " << context << std::endl;
             }
 		}
 	}

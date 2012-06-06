@@ -27,7 +27,7 @@
 #include "referencable.h"
 #include <boost/intrusive_ptr.hpp>
 
-typedef std::vector<std::string>::iterator Iterator;
+typedef std::string::iterator Iterator;
 
 class unexpected_end_of_line : public std::exception {
 };
@@ -56,7 +56,7 @@ template<typename R>
 class parsing_primitive : public referencable {
 public:
 	virtual ~parsing_primitive(){};
-	virtual bool match(std::string const &) const = 0;
+	virtual bool match(Iterator &, Iterator const &) const = 0;
 	virtual bool is_epsilon() const {return 0;}
 	virtual R parse(Iterator & pos, Iterator const & end) const = 0;
     virtual std::vector<std::string> first() const = 0;
@@ -78,8 +78,8 @@ public:
 		}
 	}
 
-	bool match(std::string const & s) const{
-		return pimpl->match(s);
+	bool match(Iterator & pos, Iterator const & end) const{
+		return pimpl->match(pos, end);
 	}
 
 	R parse(Iterator & pos, Iterator const & end) const {
@@ -100,7 +100,7 @@ private:
 	struct adata {
 		virtual ~adata(){}
 		virtual R parse(Iterator & pos, Iterator const & end) = 0;
-		virtual bool match(std::string const & s) const = 0;
+		virtual bool match(Iterator &, Iterator const &) const = 0;
         virtual std::vector<std::string> first() const = 0;
 		size_t rc;
 	};
@@ -114,8 +114,8 @@ private:
 			return boost::fusion::invoke(callable, seq.parse(pos, end));
 		}
 
-		virtual bool match(std::string const & s) const {
-			return seq.match(s);
+		virtual bool match(Iterator & pos, Iterator const & end) const {
+			return seq.match(pos, end);
 		}
         virtual std::vector<std::string> first() const {
             return seq.first();
@@ -129,7 +129,7 @@ private:
 #define TARG(n, i, data) , typename BOOST_PP_CAT(data, i)
 #define TNARG(n, i, data) , BOOST_PP_CAT(data, i)
 #define RARG(n, i, data) , rule<BOOST_PP_CAT(data, i)>
-#define MATCH(n, i, data) if (boost::fusion::at_c<i>(rules).match(s)) return true; else if (!boost::fusion::at_c<i>(rules).is_epsilon()) return false;
+#define MATCH(n, i, data) if (boost::fusion::at_c<i>(rules).match(pos, end)) return true; else if (!boost::fusion::at_c<i>(rules).is_epsilon()) return false;
 #define FIRST(n, i, data) tmp = boost::fusion::at_c<i>(rules).first(); res.insert(res.end(), tmp.begin(), tmp.end()); if (!boost::fusion::at_c<i>(rules).is_epsilon()) return res; 
 #define PARSE(n, i, data) boost::fusion::at_c<i>(ans) = boost::fusion::at_c<i>(rules).parse(pos, end);
 #define PRINT(n, i, data) << boost::fusion::at_c<i>(ans) << " "
@@ -161,7 +161,7 @@ public:\
 	boost::intrusive_ptr<binded_sequence<typename boost::fusion::result_of::invoke<C, boost::fusion::vector<T_0 BOOST_PP_REPEAT_FROM_TO(1, N, TNARG, T_)> >::type> > operator[](C const & callback) {\
 		return new binded_sequence<typename boost::fusion::result_of::invoke<C, boost::fusion::vector<T_0 BOOST_PP_REPEAT_FROM_TO(1, N, TNARG, T_)> >::type>(callback, (*this));\
 	}\
-	bool match(std::string const & s) const {\
+	bool match(Iterator & pos, Iterator const & end) const {\
 		BOOST_PP_REPEAT_FROM_TO(0, N, MATCH, ~)\
 		return false;\
 	}\
@@ -215,18 +215,23 @@ public:
 	terminal(std::string const & regex) : e(regex) {
 	}
 
-	bool match(std::string const & s) const {
-		return regex_match(s, e);
+	bool match(Iterator & pos, Iterator const & end) const {
+        boost::match_results<Iterator> res;
+        regex_search(pos, end, res, boost::regex("\\s*"), boost::match_default | boost::match_continuous);
+        pos = res[0].second;
+		return regex_search(pos, end, res, e, boost::match_default | boost::match_continuous);
 	}
 
 	T parse(Iterator & pos, Iterator const & end) const {
-		if (!match(*pos)) {
+		if (!match(pos, end)) {
             std::vector<std::string> v;
             v.push_back(e.str());
 			throw parse_error(v);
 		}
-		T r =  boost::lexical_cast<T>(*(pos++));
-		//std::cout << ">>>> TERMINAL " << r << std::endl;
+        boost::match_results<Iterator> res;
+        regex_search(pos, end, res, e, boost::match_default | boost::match_continuous);
+		T r = boost::lexical_cast<T>(std::string(res[0].first, res[0].second));
+        pos = res[0].second;
 		return r;
 	}
     
@@ -289,13 +294,12 @@ public:
 		return *is_epsilon_;
 	}
 
-	bool match(std::string const & s) const{
+	bool match(Iterator & pos, Iterator const & end) const{
 		BOOST_FOREACH(boost::intrusive_ptr<parsing_primitive<T> > const & t, *seq) {
-			if (t->match(s)) {
+			if (t->match(pos, end)) {
 				return true;
 			}
 		}
-
 		return is_epsilon();
 	}
 
@@ -305,7 +309,6 @@ public:
             tmp = t->first();
             res.insert(res.end(), tmp.begin(), tmp.end());
         }
-        
         return res;
     }
 
@@ -318,12 +321,12 @@ public:
 			}
 		}
 
-		if (!match(*pos)) {
+		if (!match(pos, end)) {
 			throw parse_error(first());
 		}
 
 		BOOST_FOREACH(boost::intrusive_ptr<parsing_primitive<T> > const & t, *seq) {
-			if (t->match(*pos)) {
+			if (t->match(pos, end)) {
 				T res = t->parse(pos, end);
 				return res;
 			}
