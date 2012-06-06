@@ -100,7 +100,7 @@ int main() {
             } else {
                 std::string::iterator some = it1+5;
                 std::string context(it1, (some>s.end())?s.end():some);
-    			std::cerr << "EXPECTED {" << e.what() << "} GOT " << context << std::endl;
+    			std::cerr << "EXPECTED {" << e.what() << "} GOT `" << context << "`" << std::endl;
             }
 		}
 	}
